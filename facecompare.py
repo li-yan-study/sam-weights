@@ -81,4 +81,4 @@ def find_and_compare_images(dir1, dir2,out_file,similarity_threshold=75):
 dir_path1 = "path/to/your/directory1"  # 放原图路径
 dir_path2 = "path/to/your/directory2"  # 放目标年龄目录路径
 out_file = "XX_face_compare.txt"
-find_and_compare_images(dir_path1, dir_path2,out_file=)
+find_and_compare_images(dir_path1, dir_path2,out_file)
