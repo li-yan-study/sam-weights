@@ -10,7 +10,7 @@ end_age = 80
 
 # 循环执行命令
 for age in range(start_age, end_age + 1):
-    command = f"python test.py --config 001 --target_age {age} --out_path ./test/output/{age} "
+    command = f"python test.py --config 001 --target_age {age} --out_path ./test/output/{age}/"
     subprocess.run(command, shell=True)
     print(f"年龄：{age} 已完成处理")
 
