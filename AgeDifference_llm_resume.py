@@ -1,6 +1,9 @@
 import os
 import re
 import argparse
+
+import base64
+
 from openai import OpenAI
 from tenacity import retry, stop_after_attempt, wait_exponential
 
@@ -28,12 +31,19 @@ def model_detect(image_path):
     """
     使用大模型检测图片中人物的年龄。
     """
+
+    """
+    需要注意，传入Base64，图像格式（即image/{format}）需要与支持的图片列表中的Content Type保持一致。"f"是字符串格式化的方法。
+    PNG图像：  f"data:image/png;base64,{base64_image}"
+    JPEG图像： f"data:image/jpeg;base64,{base64_image}"
+    WEBP图像： f"data:image/webp;base64,{base64_image}"
+    """
     messages = [
         {
             "role": "user",
             "content": [
                 {"type": "text", "text": "请检测图片中人物的年龄,并且仅仅返回检测到年龄的数字，不要有任何其他输出"},
-                {"type": "image_url", "image_url": {"url": f"file://{image_path}"}}
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_path}"}}
             ]
         }
     ]
@@ -61,6 +71,10 @@ def load_processed_files():
             processed = {os.path.abspath(line.strip()) for line in cf}
     return processed
 
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode("utf-8")
+
 def process_images(base_dir, out_file="ageDif-SAM.txt"):
     processed = load_processed_files()
     
@@ -77,6 +91,7 @@ def process_images(base_dir, out_file="ageDif-SAM.txt"):
             
             for filename in sorted(os.listdir(subdir_path)):
                 file_path = os.path.abspath(os.path.join(subdir_path, filename))
+                base64_image = encode_image(file_path)
                 if not filename.lower().endswith(('.png', '.jpg', '.jpeg')):
                     continue
                 
