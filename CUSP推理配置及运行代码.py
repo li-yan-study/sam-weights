@@ -5,6 +5,8 @@
 ## 1 首先需要下载预训练权重 分为LS和RR版本。  
 ## 2 然后下载HRFAE中DEX分类器权重（https://data.vision.ee.ethz.ch/cvl/rrothe/imdb-wiki/static/dex_imdb_wiki.caffemodel），并使用caffemodel2pytorch（https://github.com/vadimkantorov/caffemodel2pytorch）转换成.pt格式
 ## 3 使用以下代码进行推理
+# pytorch 1.10. , python 3.8  pillow, numpy 
+# imageio-ffmpeg==0.4.3 pyspng==0.1.0 pandas
 
 import os
 import time
