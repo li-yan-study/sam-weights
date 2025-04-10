@@ -1,5 +1,6 @@
 import os
 import re
+import base64
 from openai import OpenAI
 
 
@@ -8,6 +9,10 @@ client = OpenAI(
     api_key="DASHSCOPE_API_KEY",  # 替换为您的 API Key
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
+
+def encode_image(image_path):
+    with open(image_path, "rb") as image_file:
+        return base64.b64encode(image_file.read()).decode("utf-8")
 
 def model_compare(image_path1, image_path2):
     """
@@ -26,8 +31,8 @@ def model_compare(image_path1, image_path2):
             "role": "user",
             "content": [
                 {"type": "text", "text": "请判断这两张图片中的人物是否是同一个人，只允许返回“是”或“不是”"},
-                {"type": "image_url", "image_url": {"url": f"file://{image_path1}"}},
-                {"type": "image_url", "image_url": {"url": f"file://{image_path2}"}}
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_path1}"}},
+                {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_path2}"}}
             ]
         }
     ]
@@ -70,9 +75,10 @@ def find_and_compare_images(dir1, dir2, out_file):
             # 构建完整的文件路径
             path1 = os.path.join(dir1, files_dir1[filename])
             path2 = os.path.join(dir2, files_dir2[filename])
-
+            base64_image1 = encode_image(path1)
+            base64_image2 = encode_image(path2)
             # 调用大模型进行判断
-            is_same_person = model_compare(path1, path2)
+            is_same_person = model_compare(base64_image1, base64_image2)
             result = f"文件 {filename}: {'是同一个人' if is_same_person else '不是同一个人'}"
             print(result)
             f.write(result + "\n")
