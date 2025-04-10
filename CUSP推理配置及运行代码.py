@@ -3,7 +3,7 @@
 要准备模型，您需要下载原始 caffe 模型并将其转换为 PyTorch 格式。我们使用 Vadim Kantorov 发布的转换器 caffemodel2pytorch。然后将 PyTorch 模型命名为 as 并将其放入文件夹 .dex_imdb_wiki.caffemodel.pt/models"""
 
 ## 1 首先需要下载预训练权重 分为LS和RR版本。  
-## 2 然后下载HRFAE中DEX分类器权重（https://data.vision.ee.ethz.ch/cvl/rrothe/imdb-wiki/static/dex_imdb_wiki.caffemodel），并使用caffemodel2pytorch（https://github.com/vadimkantorov/caffemodel2pytorch）转换成.pt格式
+## 2 然后下载HRFAE中DEX分类器权重（https://data.vision.ee.ethz.ch/cvl/rrothe/imdb-wiki/static/dex_imdb_wiki.caffemodel），下载caffe.proto(https://raw.githubusercontent.com/BVLC/caffe/master/src/caffe/proto/caffe.proto另存为caffe.proto)并使用caffemodel2pytorch（https://github.com/vadimkantorov/caffemodel2pytorch）转换成.pt格式
 ## 3 使用以下代码进行推理
 # pytorch 1.10. , python 3.8  pillow, numpy 
 # imageio-ffmpeg==0.4.3 pyspng==0.1.0 pandas
