@@ -19,7 +19,7 @@ if args.restart and os.path.exists(CHECKPOINT_FILE):
 
 # 初始化 OpenAI 客户端
 client = OpenAI(
-    api_key=os.getenv("DASHSCOPE_API_KEY"),  # 替换为您的 API Key
+    api_key="DASHSCOPE_API_KEY",  # 替换为您的 API Key
     base_url="https://dashscope.aliyuncs.com/compatible-mode/v1",
 )
 
