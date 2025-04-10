@@ -15,7 +15,6 @@ import torch.nn.functional as F
 
 import PIL.Image
 import numpy as np
-import matplotlib.pyplot as plt
 
 # Custom modules
 from training.networks import VGG, module_no_grad
@@ -27,6 +26,11 @@ import dnnlib
 weights_path = "path/to/pretrained.pkl"  # Replace with the actual path to pretrained.pkl
 vgg_path = "path/to/dex_imdb_wiki.caffemodel.pt"  # Replace with the actual path to dex_imdb_wiki.caffemodel.pt
 sample_images_path = "path/to/sample_images"  # Replace with the actual path to sample images folder
+output_dir = "path/to/output_images"  # Replace with the desired output directory
+
+# Create output directory if it doesn't exist
+if not os.path.exists(output_dir):
+    os.makedirs(output_dir, exist_ok=True)
 
 # Running configuration
 FFHQ_LS_KEY = "lats"  # Model trained on LATS dataset
@@ -166,7 +170,7 @@ im_out_tensor_exp = torch.concat([
 ])
 im_out_tensor = im_out_tensor_exp.reshape([-1, steps, *im_out_tensor_exp.shape[1:]])
 
-# Visualization
+# Save results to files
 def to_uint8(im_tensor):
     """
     Convert tensor to uint8 image format.
@@ -175,15 +179,19 @@ def to_uint8(im_tensor):
     im_tensor = np.clip(im_tensor, 0, 255).astype(np.uint8)
     return im_tensor
 
-# Plot results
 for fname, im_in, im_out, age_labels in zip(
         filenames_batch, im_in_tensor, im_out_tensor,
         labels_exp.cpu().numpy().reshape(-1, steps)
 ):
-    fig, axs = plt.subplots(1, steps + 1, figsize=(steps * 4, 4), dpi=100)
-    age_labels = ['Input'] + [f'Label "{i}"' for i in age_labels]
-    for ax, im, l in zip(axs, [im_in, *im_out], age_labels):
-        ax.axis('off')
-        ax.imshow(to_uint8(im))
-        ax.set_title(l, fontname='Liberation Serif')
-    plt.show()
+    base_name = os.path.splitext(os.path.basename(fname))[0]  # Extract filename without extension
+    for step, (age_label, im_step) in enumerate(zip(age_labels, im_out)):
+        # Create subdirectory for the target age
+        age_subdir = os.path.join(output_dir, f"a{age_label}")
+        if not os.path.exists(age_subdir):
+            os.makedirs(age_subdir, exist_ok=True)
+
+        # Save the image with the same name as the input file
+        output_filename = f"{base_name}.png"
+        output_path = os.path.join(age_subdir, output_filename)
+        PIL.Image.fromarray(to_uint8(im_step)).save(output_path)
+        print(f"Saved: {output_path}")
