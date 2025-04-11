@@ -27,7 +27,7 @@ import dnnlib
 # Paths to local files
 weights_path = "CUSP-main/checkpoints/pretrained_ffhq_rr/network-snapshot-002408.pkl"  # Replace with the actual path to pretrained.pkl
 vgg_path = "CUSP-main/checkpoints/dex_imdb_wiki.caffemodel.pt"  # Replace with the actual path to dex_imdb_wiki.caffemodel.pt
-sample_images_path = "CUSP-main/sample_images"  # Replace with the actual path to sample images folder
+sample_images_path = "CUSP-main/test_data"  # Replace with the actual path to sample images folder
 output_dir = "CUSP-main/output_images"  # Replace with the desired output directory
 
 # Create output directory if it doesn't exist
@@ -60,7 +60,7 @@ data_labels_range = configs[KEY]['classes']
 filenames_batch = [
     os.path.join(sample_images_path, f)
     for f in next(iter(os.walk(sample_images_path)))[2]
-    if f[-4:] == '.png'
+    if f.lower().endswith(('.png', '.jpg', '.jpeg'))
 ]
 
 
@@ -143,36 +143,24 @@ def run_model(G, img, label, global_blur_val=None, mask_blur_val=None, return_ms
 
 
 # Image preprocessing
-imgs = [np.array(PIL.Image.open(f).resize((img_side, img_side)), dtype=np.float32).transpose((2, 0, 1))
-        for f in filenames_batch]
-im_in_tensor = (torch.tensor(np.array(imgs)) / 256 * 2 - 1).to(device)  # Normalize to [-1, 1]
+def preprocess_image(image_path, img_side):
+    """
+    Preprocess a single image.
+    """
+    img = PIL.Image.open(image_path).convert('RGB').resize((img_side, img_side))
+    img = np.array(img, dtype=np.float32).transpose((2, 0, 1))
+    img = (torch.tensor(img) / 256 * 2 - 1).unsqueeze(0)  # Normalize to [-1, 1]
+    return img.to(device)
+
 
 # Aging steps
 steps = 10  # Number of aging steps
-n_images = im_in_tensor.shape[0]
-im_in_tensor_exp = im_in_tensor[:, None].expand([n_images, steps, *im_in_tensor.shape[1:]]).reshape([-1, *im_in_tensor.shape[1:]])
-labels_exp = torch.tensor(np.repeat(np.linspace(*data_labels_range, steps, dtype=int)[:, None], n_images, 1).T.reshape(-1)).to(device)
+labels_exp = torch.tensor(np.linspace(*data_labels_range, steps, dtype=int)).to(device)
 
 # Load the model
 G_ema = load_model(weights_path, vgg_path, device)
 
-# Run inference
-batch_size = 12
-im_out_tensor_exp = torch.concat([
-    run_model(
-        G_ema,
-        mini_im,
-        mini_label,
-        global_blur_val=0.2,  # CUSP global blur
-        mask_blur_val=0.8     # CUSP masked blur
-    ) for mini_im, mini_label in zip(
-        im_in_tensor_exp.split(batch_size),
-        labels_exp.split(batch_size)
-    )
-])
-im_out_tensor = im_out_tensor_exp.reshape([-1, steps, *im_out_tensor_exp.shape[1:]])
-
-# Save results to files
+# Function to convert tensor to uint8 image format
 def to_uint8(im_tensor):
     """
     Convert tensor to uint8 image format.
@@ -181,12 +169,33 @@ def to_uint8(im_tensor):
     im_tensor = np.clip(im_tensor, 0, 255).astype(np.uint8)
     return im_tensor
 
-for fname, im_in, im_out, age_labels in zip(
-        filenames_batch, im_in_tensor, im_out_tensor,
-        labels_exp.cpu().numpy().reshape(-1, steps)
-):
+# Process images one by one
+for fname in filenames_batch:
     base_name = os.path.splitext(os.path.basename(fname))[0]  # Extract filename without extension
-    for step, (age_label, im_step) in enumerate(zip(age_labels, im_out)):
+    
+    # Preprocess the image
+    im_in_tensor = preprocess_image(fname, img_side)
+    
+    # Expand for multiple labels
+    im_in_tensor_exp = im_in_tensor.expand([steps, *im_in_tensor.shape[1:]])
+    
+    # Run inference in batches
+    batch_size = 2  # Adjust based on your GPU memory
+    im_out_tensor = []
+    for mini_im, mini_label in zip(im_in_tensor_exp.split(batch_size), labels_exp.split(batch_size)):
+        im_out = run_model(
+            G_ema,
+            mini_im,
+            mini_label,
+            global_blur_val=0.2,  # CUSP global blur
+            mask_blur_val=0.8     # CUSP masked blur
+        )
+        im_out_tensor.append(im_out)
+    
+    im_out_tensor = torch.cat(im_out_tensor, dim=0)
+
+    # Save results to files
+    for step, (age_label, im_step) in enumerate(zip(labels_exp.cpu().numpy(), im_out_tensor)):
         # Create subdirectory for the target age
         age_subdir = os.path.join(output_dir, f"{age_label}")
         if not os.path.exists(age_subdir):
