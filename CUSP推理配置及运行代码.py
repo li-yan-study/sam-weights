@@ -25,10 +25,10 @@ from torch_utils import misc
 import dnnlib
 
 # Paths to local files
-weights_path = "path/to/pretrained.pkl"  # Replace with the actual path to pretrained.pkl
-vgg_path = "path/to/dex_imdb_wiki.caffemodel.pt"  # Replace with the actual path to dex_imdb_wiki.caffemodel.pt
-sample_images_path = "path/to/sample_images"  # Replace with the actual path to sample images folder
-output_dir = "path/to/output_images"  # Replace with the desired output directory
+weights_path = "CUSP-main/checkpoints/pretrained_ffhq_rr/network-snapshot-002408.pkl"  # Replace with the actual path to pretrained.pkl
+vgg_path = "CUSP-main/checkpoints/dex_imdb_wiki.caffemodel.pt"  # Replace with the actual path to dex_imdb_wiki.caffemodel.pt
+sample_images_path = "CUSP-main/sample_images"  # Replace with the actual path to sample images folder
+output_dir = "CUSP-main/output_images"  # Replace with the desired output directory
 
 # Create output directory if it doesn't exist
 if not os.path.exists(output_dir):
@@ -39,7 +39,7 @@ FFHQ_LS_KEY = "lats"  # Model trained on LATS dataset
 FFHQ_RR_KEY = "hrfae"  # Model trained on HRFAE dataset
 
 # Choose one from above
-KEY = FFHQ_LS_KEY  # [FFHQ_RR_KEY or FFHQ_LS_KEY]
+KEY = FFHQ_RR_KEY  # [FFHQ_RR_KEY or FFHQ_LS_KEY]
 
 # Config and image side
 configs = {
@@ -148,7 +148,7 @@ imgs = [np.array(PIL.Image.open(f).resize((img_side, img_side)), dtype=np.float3
 im_in_tensor = (torch.tensor(np.array(imgs)) / 256 * 2 - 1).to(device)  # Normalize to [-1, 1]
 
 # Aging steps
-steps = 4  # Number of aging steps
+steps = 10  # Number of aging steps
 n_images = im_in_tensor.shape[0]
 im_in_tensor_exp = im_in_tensor[:, None].expand([n_images, steps, *im_in_tensor.shape[1:]]).reshape([-1, *im_in_tensor.shape[1:]])
 labels_exp = torch.tensor(np.repeat(np.linspace(*data_labels_range, steps, dtype=int)[:, None], n_images, 1).T.reshape(-1)).to(device)
@@ -188,7 +188,7 @@ for fname, im_in, im_out, age_labels in zip(
     base_name = os.path.splitext(os.path.basename(fname))[0]  # Extract filename without extension
     for step, (age_label, im_step) in enumerate(zip(age_labels, im_out)):
         # Create subdirectory for the target age
-        age_subdir = os.path.join(output_dir, f"a{age_label}")
+        age_subdir = os.path.join(output_dir, f"{age_label}")
         if not os.path.exists(age_subdir):
             os.makedirs(age_subdir, exist_ok=True)
 
