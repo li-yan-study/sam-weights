@@ -169,20 +169,23 @@ def to_uint8(im_tensor):
     im_tensor = np.clip(im_tensor, 0, 255).astype(np.uint8)
     return im_tensor
 
-# Process images one by one
-for fname in filenames_batch:
-    base_name = os.path.splitext(os.path.basename(fname))[0]  # Extract filename without extension
-    
-    # Preprocess the image
-    im_in_tensor = preprocess_image(fname, img_side)
-    
+# Process images in batches
+image_batch_size = 128  # Number of images to process at once (adjust based on GPU memory)
+label_batch_size = 10  # Number of labels to process at once (adjust based on GPU memory)
+
+for img_batch_fnames in [filenames_batch[i:i + image_batch_size] for i in range(0, len(filenames_batch), image_batch_size)]:
+    # Preprocess the batch of images
+    im_in_tensors = [preprocess_image(fname, img_side) for fname in img_batch_fnames]
+    im_in_tensor = torch.cat(im_in_tensors, dim=0)  # Shape: [image_batch_size, 3, img_side, img_side]
+
     # Expand for multiple labels
-    im_in_tensor_exp = im_in_tensor.expand([steps, *im_in_tensor.shape[1:]])
-    
+    n_images = im_in_tensor.shape[0]
+    im_in_tensor_exp = im_in_tensor[:, None].expand([n_images, steps, *im_in_tensor.shape[1:]]).reshape([-1, *im_in_tensor.shape[1:]])
+    labels_exp_batch = labels_exp.unsqueeze(0).expand([n_images, steps]).reshape(-1).to(device)
+
     # Run inference in batches
-    batch_size = 2  # Adjust based on your GPU memory
     im_out_tensor = []
-    for mini_im, mini_label in zip(im_in_tensor_exp.split(batch_size), labels_exp.split(batch_size)):
+    for mini_im, mini_label in zip(im_in_tensor_exp.split(label_batch_size), labels_exp_batch.split(label_batch_size)):
         im_out = run_model(
             G_ema,
             mini_im,
@@ -191,18 +194,21 @@ for fname in filenames_batch:
             mask_blur_val=0.8     # CUSP masked blur
         )
         im_out_tensor.append(im_out)
-    
+
     im_out_tensor = torch.cat(im_out_tensor, dim=0)
+    im_out_tensor = im_out_tensor.reshape([n_images, steps, *im_in_tensor.shape[1:]])
 
     # Save results to files
-    for step, (age_label, im_step) in enumerate(zip(labels_exp.cpu().numpy(), im_out_tensor)):
-        # Create subdirectory for the target age
-        age_subdir = os.path.join(output_dir, f"{age_label}")
-        if not os.path.exists(age_subdir):
-            os.makedirs(age_subdir, exist_ok=True)
+    for idx, (fname, im_out) in enumerate(zip(img_batch_fnames, im_out_tensor)):
+        base_name = os.path.splitext(os.path.basename(fname))[0]  # Extract filename without extension
+        for step, (age_label, im_step) in enumerate(zip(labels_exp.cpu().numpy(), im_out)):
+            # Create subdirectory for the target age
+            age_subdir = os.path.join(output_dir, f"{age_label}")
+            if not os.path.exists(age_subdir):
+                os.makedirs(age_subdir, exist_ok=True)
 
-        # Save the image with the same name as the input file
-        output_filename = f"{base_name}.png"
-        output_path = os.path.join(age_subdir, output_filename)
-        PIL.Image.fromarray(to_uint8(im_step)).save(output_path)
-        print(f"Saved: {output_path}")
+            # Save the image with the same name as the input file
+            output_filename = f"{base_name}.png"
+            output_path = os.path.join(age_subdir, output_filename)
+            PIL.Image.fromarray(to_uint8(im_step)).save(output_path)
+            print(f"Saved: {output_path}")
