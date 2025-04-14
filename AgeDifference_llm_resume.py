@@ -35,7 +35,7 @@ def model_detect(image_path):
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "请检测图片中人物的年龄和质量评分(0-100)，并以以下格式返回: age:{年龄}, quality:{质量评分}"},
+                {"type": "text", "text": "请检测图片中人物的年龄和带两位小数点质量评分(0-100)，并以以下格式返回: age:{年龄}, quality:{质量评分}"},
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_path}"}}
             ]
         }
@@ -97,7 +97,7 @@ def process_images(base_dir, out_file="age_quality_analysis.txt"):
     subdir_metrics = checkpoint_data["subdir_metrics"]
     total_metrics = checkpoint_data["total_metrics"]
 
-    with open(out_file, 'a' if args.resume else 'w') as f:  # 结果文件模式控制
+    with open(out_file, 'a' if args.resume else 'w', encoding="utf-8") as f:  # 结果文件模式控制
         for subdir in sorted(os.listdir(base_dir)):
             subdir_path = os.path.join(base_dir, subdir)
             if not os.path.isdir(subdir_path):
@@ -127,13 +127,17 @@ def process_images(base_dir, out_file="age_quality_analysis.txt"):
                     # 数据记录
                     target_age = int(subdir)  # 假设子目录名称为目标年龄
                     detected_age = detection_result['age']
-                    quality = detection_result['quality']
+                    quality = detection_result['quality']  # 原始质量评分
                     diff = abs(target_age - detected_age)
-                    log_line = f"{file_path} | 目标:{target_age} | 检测:{detected_age} | 差异:{diff} | 质量评分:{quality:.2f}"
+                    
+                    # 将质量评分转换为百分制
+                    quality_percent = quality / 100 * 100  # 确保范围为 0-100%
+                    
+                    log_line = f"{file_path} | 目标:{target_age} | 检测:{detected_age} | 差异:{diff} | 质量评分:{quality_percent:.2f}"
                     print(log_line)
                     f.write(log_line + '\n')
                     
-                    # 更新指标
+                    # 更新指标（存储原始质量评分）
                     current_metrics['diff'].append(diff)
                     current_metrics['quality'].append(quality)
                     
@@ -145,7 +149,7 @@ def process_images(base_dir, out_file="age_quality_analysis.txt"):
                         "total_metrics": total_metrics
                     })
                     # 延时2s
-                    time.sleep(1.1)
+                    time.sleep(3)
                 except Exception as e:
                     print(f"处理失败: {filename} - {str(e)}")
                     continue
@@ -153,14 +157,18 @@ def process_images(base_dir, out_file="age_quality_analysis.txt"):
             # 更新子目录统计
             if current_metrics['diff'] and current_metrics['quality']:
                 avg_diff = sum(current_metrics['diff']) / len(current_metrics['diff'])
+                
+                # 计算平均质量评分并转换为百分制
                 avg_quality = sum(current_metrics['quality']) / len(current_metrics['quality'])
-                avg_line = f"[{subdir}] 平均差异:{avg_diff:.2f} | 平均质量评分:{avg_quality:.2f}"
+                avg_quality_percent = avg_quality / 100 * 100  # 确保范围为 0-100%
+                
+                avg_line = f"[{subdir}] 平均差异:{avg_diff:.2f} | 平均质量评分:{avg_quality_percent:.2f}"
                 print(avg_line)
                 f.write(avg_line + '\n')
 
                 subdir_metrics[subdir] = {
                     "avg_diff": avg_diff,
-                    "avg_quality": avg_quality
+                    "avg_quality_percent": avg_quality_percent
                 }
 
                 # 更新全局统计
@@ -170,8 +178,12 @@ def process_images(base_dir, out_file="age_quality_analysis.txt"):
         # 全局统计
         if total_metrics['diff'] and total_metrics['quality']:
             final_avg_diff = sum(total_metrics['diff']) / len(total_metrics['diff'])
+            
+            # 计算全局平均质量评分并转换为百分制
             final_avg_quality = sum(total_metrics['quality']) / len(total_metrics['quality'])
-            final_line = f"[总计] 平均差异:{final_avg_diff:.2f} | 平均质量评分:{final_avg_quality:.2f}"
+            final_avg_quality_percent = final_avg_quality / 100 * 100  # 确保范围为 0-100%
+            
+            final_line = f"[总计] 平均差异:{final_avg_diff:.2f} | 平均质量评分:{final_avg_quality_percent:.2f}"
             print('\n' + final_line)
             f.write(final_line + '\n')
 
