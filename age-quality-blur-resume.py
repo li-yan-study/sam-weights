@@ -3,11 +3,9 @@ import argparse
 import requests
 from json import JSONDecoder
 import time
-# from tenacity import retry, stop_after_attempt, wait_exponential
+import json
 
 
-#   python script.py --restart   全新开始
-#   python script.py --resume    断点续传
 # 参数解析设置
 parser = argparse.ArgumentParser(description='人脸年龄检测批处理工具')
 parser.add_argument('--resume', action='store_true', help='从上次中断处继续运行')
@@ -22,35 +20,58 @@ if args.restart and os.path.exists(CHECKPOINT_FILE):
 
 # API配置
 HTTP_URL = "https://api-cn.faceplusplus.com/facepp/v3/detect"
-API_KEY = "UoP6baxo5c9lmcW4DcRpK9aaPsv6dGva"    # 替换实际值
+API_KEY = "UoP6baxo5c9lmcW4DcRpK9aaPsv6dGva"  # 替换实际值
 API_SECRET = "HIPPhrYrLAis0qqBij4Km1iWpjQFmieO"  # 替换实际值
 
-# @retry(stop=stop_after_attempt(3), wait=wait_exponential(multiplier=1, min=4, max=10))
 def face_detect(http_url, data, files):
     response = requests.post(http_url, data=data, files=files)
     response.raise_for_status()
     return JSONDecoder().decode(response.content.decode('utf-8'))
 
-def load_processed_files():
-    processed = set()
-    if os.path.exists(CHECKPOINT_FILE):
-        with open(CHECKPOINT_FILE, 'r') as cf:
-            processed = {os.path.abspath(line.strip()) for line in cf}
-    return processed
+def load_checkpoint():
+    """加载检查点文件"""
+    if not os.path.exists(CHECKPOINT_FILE):
+        return {
+            "processed": set(),
+            "subdir_stats": {},
+            "total_metrics": {"diff": [], "quality": []}
+        }
+    
+    with open(CHECKPOINT_FILE, 'r') as cf:
+        checkpoint_data = json.load(cf)
+        processed = set(checkpoint_data.get("processed", []))
+        subdir_stats = checkpoint_data.get("subdir_stats", {})
+        total_metrics = checkpoint_data.get("total_metrics", {"diff": [], "quality": []})
+        return {"processed": processed, "subdir_stats": subdir_stats, "total_metrics": total_metrics}
+
+def save_checkpoint(processed, subdir_stats, total_metrics):
+    """保存检查点文件"""
+    checkpoint_data = {
+        "processed": list(processed),
+        "subdir_stats": subdir_stats,
+        "total_metrics": total_metrics
+    }
+    with open(CHECKPOINT_FILE, 'w') as cf:
+        json.dump(checkpoint_data, cf, indent=4)
 
 def process_images(base_dir, out_file="ageDif-SAM.txt"):
-    processed = load_processed_files()
+    checkpoint = load_checkpoint()
+    processed = checkpoint["processed"]
+    subdir_stats = checkpoint["subdir_stats"]
+    total_metrics = checkpoint["total_metrics"]
     
-    with open(out_file, 'a' if args.resume else 'w',encoding="utf-8") as f:  # 结果文件模式控制
-        total_metrics = {'diff': [], 'blur': [], 'quality': []}
+    with open(out_file, 'a' if args.resume else 'w', encoding="utf-8") as f:  # 结果文件模式控制
         
         for subdir in sorted(os.listdir(base_dir)):
             subdir_path = os.path.join(base_dir, subdir)
             if not os.path.isdir(subdir_path):
                 continue
-
-            # current_metrics = {'diff': [], 'blur': [], 'quality': []}
-            current_metrics = {'diff': [],  'quality': []}
+            
+            if subdir in subdir_stats:
+                print(f"\n跳过已处理目录: {subdir}")
+                continue
+            
+            current_metrics = {'diff': [], 'quality': []}
             print(f"\n处理目录: {subdir_path}")
             
             for filename in sorted(os.listdir(subdir_path)):
@@ -73,7 +94,6 @@ def process_images(base_dir, out_file="ageDif-SAM.txt"):
                     # 数据提取
                     face = result['faces'][0]
                     age = face['attributes']['age']['value']
-                    # blur = face['attributes']['blur']['value']
                     quality = face['attributes']['facequality']['value']
                     
                     # 记录结果
@@ -84,37 +104,44 @@ def process_images(base_dir, out_file="ageDif-SAM.txt"):
                     
                     # 更新指标
                     current_metrics['diff'].append(diff)
-                    # current_metrics['blur'].append(blur)
                     current_metrics['quality'].append(quality)
                     
                     # 更新检查点
-                    with open(CHECKPOINT_FILE, 'a') as cf:
-                        cf.write(file_path + '\n')
                     processed.add(file_path)
                     
                     # 延时2s
                     time.sleep(1.1)
                 except Exception as e:
-                    print(f"处理失败: {filename} - {str(e)}"+'\n')
+                    print(f"处理失败: {filename} - {str(e)}\n")
                     print(result)
                     continue
-
+            
             # 目录级统计
             if current_metrics['diff']:
-                avg_line = f"[{subdir}] 平均差异:{sum(current_metrics['diff'])/len(current_metrics['diff']):.2f} | " \
-                          f"平均模糊:{sum(current_metrics['blur'])/len(current_metrics['blur']):.2f} | " \
-                          f"平均质量:{sum(current_metrics['quality'])/len(current_metrics['quality']):.2f}"
+                avg_diff = sum(current_metrics['diff']) / len(current_metrics['diff'])
+                avg_quality = sum(current_metrics['quality']) / len(current_metrics['quality'])
+                avg_line = f"[{subdir}] 平均差异:{avg_diff:.2f} | 平均质量:{avg_quality:.2f}"
                 print(avg_line)
                 f.write(avg_line + '\n')
+                
+                # 更新子目录统计
+                subdir_stats[subdir] = {
+                    "avg_diff": avg_diff,
+                    "avg_quality": avg_quality
+                }
+                
+                # 更新全局统计
                 total_metrics['diff'].extend(current_metrics['diff'])
-                total_metrics['blur'].extend(current_metrics['blur'])
                 total_metrics['quality'].extend(current_metrics['quality'])
-
+            
+            # 保存检查点
+            save_checkpoint(processed, subdir_stats, total_metrics)
+        
         # 全局统计
         if total_metrics['diff']:
-            final_line = f"[总计] 平均差异:{sum(total_metrics['diff'])/len(total_metrics['diff']):.2f} | " \
-                        f"平均模糊:{sum(total_metrics['blur'])/len(total_metrics['blur']):.2f} | " \
-                        f"平均质量:{sum(total_metrics['quality'])/len(total_metrics['quality']):.2f}"
+            global_avg_diff = sum(total_metrics['diff']) / len(total_metrics['diff'])
+            global_avg_quality = sum(total_metrics['quality']) / len(total_metrics['quality'])
+            final_line = f"[总计] 平均差异:{global_avg_diff:.2f} | 平均质量:{global_avg_quality:.2f}"
             print('\n' + final_line)
             f.write(final_line + '\n')
 
