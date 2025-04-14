@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import time
 import argparse
 import base64
 from openai import OpenAI
@@ -143,7 +144,8 @@ def process_images(base_dir, out_file="age_quality_analysis.txt"):
                         "subdir_metrics": subdir_metrics,
                         "total_metrics": total_metrics
                     })
-                
+                    # 延时2s
+                    time.sleep(1.1)
                 except Exception as e:
                     print(f"处理失败: {filename} - {str(e)}")
                     continue
