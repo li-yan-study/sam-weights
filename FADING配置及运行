@@ -1,0 +1,260 @@
+## 需要修改FADING-master/FADING_util/ptp_utils.py这文件，按照以下要求修改
+"""所以，要解决这个问题，应该改变这个函数register_recr
+
+def register_recr(net_, count, place_in_unet):
+        if net_.__class__.__name__ == 'Attention':
+并重写ca_forward。对于 0.17.1 版本，它看起来像：
+
+def ca_forward(self, place_in_unet):
+        to_out = self.to_out
+        if type(to_out) is torch.nn.modules.container.ModuleList:
+            to_out = self.to_out[0]
+        else:
+            to_out = self.to_out
+        
+        def forward(hidden_states, encoder_hidden_states=None, attention_mask=None,temb=None,):
+            is_cross = encoder_hidden_states is not None
+            
+            residual = hidden_states
+
+            if self.spatial_norm is not None:
+                hidden_states = self.spatial_norm(hidden_states, temb)
+
+            input_ndim = hidden_states.ndim
+
+            if input_ndim == 4:
+                batch_size, channel, height, width = hidden_states.shape
+                hidden_states = hidden_states.view(batch_size, channel, height * width).transpose(1, 2)
+
+            batch_size, sequence_length, _ = (
+                hidden_states.shape if encoder_hidden_states is None else encoder_hidden_states.shape
+            )
+            attention_mask = self.prepare_attention_mask(attention_mask, sequence_length, batch_size)
+
+            if self.group_norm is not None:
+                hidden_states = self.group_norm(hidden_states.transpose(1, 2)).transpose(1, 2)
+
+            query = self.to_q(hidden_states)
+
+            if encoder_hidden_states is None:
+                encoder_hidden_states = hidden_states
+            elif self.norm_cross:
+                encoder_hidden_states = self.norm_encoder_hidden_states(encoder_hidden_states)
+
+            key = self.to_k(encoder_hidden_states)
+            value = self.to_v(encoder_hidden_states)
+
+            query = self.head_to_batch_dim(query)
+            key = self.head_to_batch_dim(key)
+            value = self.head_to_batch_dim(value)
+
+            attention_probs = self.get_attention_scores(query, key, attention_mask)
+            attention_probs = controller(attention_probs, is_cross, place_in_unet)
+
+            hidden_states = torch.bmm(attention_probs, value)
+            hidden_states = self.batch_to_head_dim(hidden_states)
+
+            # linear proj
+            hidden_states = to_out(hidden_states)
+
+            if input_ndim == 4:
+                hidden_states = hidden_states.transpose(-1, -2).reshape(batch_size, channel, height, width)
+
+            if self.residual_connection:
+                hidden_states = hidden_states + residual
+
+            hidden_states = hidden_states / self.rescale_output_factor
+
+            return hidden_states
+        return forward
+"""
+
+import os
+import argparse
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+from torchvision import transforms
+from PIL import Image
+from diffusers import StableDiffusionPipeline, DDIMScheduler
+
+from FADING_util import util
+from p2p import *
+from null_inversion import *
+
+# Argument parser
+parser = argparse.ArgumentParser()
+
+parser.add_argument('--image_dir', required=True, help='Path to directory containing input images')
+parser.add_argument('--gender', required=True, choices=["female", "male"], help="Specify the gender ('female' or 'male')")
+parser.add_argument('--vgg_checkpoint', required=True, help='Path to VGG checkpoint for age prediction')
+parser.add_argument('--specialized_path', required=True, help='Path to specialized diffusion model')
+parser.add_argument('--save_aged_dir', default='./outputs', help='Path to save outputs')
+parser.add_argument('--target_ages', nargs='+', default=[10, 20, 40, 60, 80], type=int, help='Target age values')
+
+args = parser.parse_args()
+
+# Define VGG class
+class VGG(nn.Module):
+    def __init__(self, pool='max'):
+        super(VGG, self).__init__()
+        self.conv1_1 = nn.Conv2d(3, 64, kernel_size=3, padding=1)
+        self.conv1_2 = nn.Conv2d(64, 64, kernel_size=3, padding=1)
+        self.conv2_1 = nn.Conv2d(64, 128, kernel_size=3, padding=1)
+        self.conv2_2 = nn.Conv2d(128, 128, kernel_size=3, padding=1)
+        self.conv3_1 = nn.Conv2d(128, 256, kernel_size=3, padding=1)
+        self.conv3_2 = nn.Conv2d(256, 256, kernel_size=3, padding=1)
+        self.conv3_3 = nn.Conv2d(256, 256, kernel_size=3, padding=1)
+        self.conv4_1 = nn.Conv2d(256, 512, kernel_size=3, padding=1)
+        self.conv4_2 = nn.Conv2d(512, 512, kernel_size=3, padding=1)
+        self.conv4_3 = nn.Conv2d(512, 512, kernel_size=3, padding=1)
+        self.conv5_1 = nn.Conv2d(512, 512, kernel_size=3, padding=1)
+        self.conv5_2 = nn.Conv2d(512, 512, kernel_size=3, padding=1)
+        self.conv5_3 = nn.Conv2d(512, 512, kernel_size=3, padding=1)
+        self.fc6 = nn.Linear(25088, 4096, bias=True)
+        self.fc7 = nn.Linear(4096, 4096, bias=True)
+        self.fc8_101 = nn.Linear(4096, 101, bias=True)
+
+        if pool == 'max':
+            self.pool1 = nn.MaxPool2d(kernel_size=2, stride=2)
+            self.pool2 = nn.MaxPool2d(kernel_size=2, stride=2)
+            self.pool3 = nn.MaxPool2d(kernel_size=2, stride=2)
+            self.pool4 = nn.MaxPool2d(kernel_size=2, stride=2)
+            self.pool5 = nn.MaxPool2d(kernel_size=2, stride=2)
+        elif pool == 'avg':
+            self.pool1 = nn.AvgPool2d(kernel_size=2, stride=2)
+            self.pool2 = nn.AvgPool2d(kernel_size=2, stride=2)
+            self.pool3 = nn.AvgPool2d(kernel_size=2, stride=2)
+            self.pool4 = nn.AvgPool2d(kernel_size=2, stride=2)
+            self.pool5 = nn.AvgPool2d(kernel_size=2, stride=2)
+
+    def forward(self, x):
+        out = {}
+        out['r11'] = F.relu(self.conv1_1(x))
+        out['r12'] = F.relu(self.conv1_2(out['r11']))
+        out['p1'] = self.pool1(out['r12'])
+        out['r21'] = F.relu(self.conv2_1(out['p1']))
+        out['r22'] = F.relu(self.conv2_2(out['r21']))
+        out['p2'] = self.pool2(out['r22'])
+        out['r31'] = F.relu(self.conv3_1(out['p2']))
+        out['r32'] = F.relu(self.conv3_2(out['r31']))
+        out['r33'] = F.relu(self.conv3_3(out['r32']))
+        out['p3'] = self.pool3(out['r33'])
+        out['r41'] = F.relu(self.conv4_1(out['p3']))
+        out['r42'] = F.relu(self.conv4_2(out['r41']))
+        out['r43'] = F.relu(self.conv4_3(out['r42']))
+        out['p4'] = self.pool4(out['r43'])
+        out['r51'] = F.relu(self.conv5_1(out['p4']))
+        out['r52'] = F.relu(self.conv5_2(out['r51']))
+        out['r53'] = F.relu(self.conv5_3(out['r52']))
+        out['p5'] = self.pool5(out['r53'])
+        out['p5'] = out['p5'].view(out['p5'].size(0), -1)
+        out['fc6'] = F.relu(self.fc6(out['p5']))
+        out['fc7'] = F.relu(self.fc7(out['fc6']))
+        out['fc8'] = self.fc8_101(out['fc7'])
+        return out['fc8']
+
+# Preprocess function
+def preprocess_image(image_path):
+    transform = transforms.Compose([
+        transforms.Resize((224, 224)),
+        transforms.ToTensor(),
+        transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+    ])
+    image = Image.open(image_path).convert('RGB')
+    image_tensor = transform(image).unsqueeze(0)  # Add batch dimension
+    return image_tensor
+
+# Predict age using VGG
+def predict_age(vgg_model, image_tensor):
+    with torch.no_grad():
+        output = vgg_model(image_tensor)
+        predicted_class = torch.argmax(output, dim=1).item()
+        age_init = predicted_class + 1  # Assuming class range [0, 100] corresponds to age [1, 101]
+    return age_init
+
+# Load arguments
+image_dir = args.image_dir
+gender = args.gender
+save_aged_dir = args.save_aged_dir
+specialized_path = args.specialized_path
+vgg_checkpoint = args.vgg_checkpoint
+target_ages = args.target_ages
+
+if not os.path.exists(save_aged_dir):
+    os.makedirs(save_aged_dir)
+
+# Load VGG model for age prediction
+device = torch.device('cuda:0') if torch.cuda.is_available() else torch.device('cpu')
+vgg_state_dict = torch.load(vgg_checkpoint)
+vgg_state_dict = {k.replace('-', '_'): v for k, v in vgg_state_dict.items()}
+vgg_model = VGG(pool='max').to(device)
+vgg_model.load_state_dict(vgg_state_dict)
+vgg_model.eval()
+
+# Load specialized diffusion model
+scheduler = DDIMScheduler(beta_start=0.00085, beta_end=0.012, beta_schedule="scaled_linear",
+                          clip_sample=False, set_alpha_to_one=False,
+                          steps_offset=1)
+ldm_stable = StableDiffusionPipeline.from_pretrained(specialized_path,
+    scheduler=scheduler,
+    safety_checker=None,
+    use_safetensors=False).to(device)
+tokenizer = ldm_stable.tokenizer
+
+# Process all images in the directory
+for image_name in os.listdir(image_dir):
+    if not image_name.lower().endswith(('.png', '.jpg', '.jpeg')):
+        continue  # Skip non-image files
+
+    image_path = os.path.join(image_dir, image_name)
+    print(f"Processing image: {image_path}")
+
+    # Preprocess input image and predict initial age
+    image_tensor = preprocess_image(image_path).to(device)
+    age_init = predict_age(vgg_model, image_tensor)
+    print(f"Predicted initial age: {age_init}")
+
+    # Generate inversion prompt
+    gt_gender = int(gender == 'female')
+    person_placeholder = util.get_person_placeholder(age_init, gt_gender)
+    inversion_prompt = f"photo of {age_init} year old {person_placeholder}"
+    input_img_name = image_name.split('.')[-2]
+
+    # Null text inversion
+    null_inversion = NullInversion(ldm_stable)
+    (image_gt, image_enc), x_t, uncond_embeddings = null_inversion.invert(image_path, inversion_prompt,
+                                                                         offsets=(0, 0, 0, 0), verbose=True)
+
+    # Age editing
+    for age_new in target_ages:
+        print(f'Age editing with target age {age_new}...')
+
+        # Create subdirectory for target age
+        age_dir = os.path.join(save_aged_dir, str(age_new))
+        if not os.path.exists(age_dir):
+            os.makedirs(age_dir)
+
+        new_person_placeholder = util.get_person_placeholder(age_new, gt_gender)
+        new_prompt = inversion_prompt.replace(person_placeholder, new_person_placeholder)
+        new_prompt = new_prompt.replace(str(age_init), str(age_new))
+
+        blend_word = (((str(age_init), person_placeholder,), (str(age_new), new_person_placeholder,)))
+        is_replace_controller = True
+        prompts = [inversion_prompt, new_prompt]
+
+        cross_replace_steps = {'default_': .8,}
+        self_replace_steps = .5
+        eq_params = {"words": (str(age_new)), "values": (1,)}
+
+        controller = make_controller(prompts, is_replace_controller, cross_replace_steps, self_replace_steps,
+                                   tokenizer, blend_word, eq_params)
+
+        images, _ = p2p_text2image(ldm_stable, prompts, controller, generator=torch.Generator(device=device).manual_seed(0),
+                                   latent=x_t, uncond_embeddings=uncond_embeddings)
+
+        new_img = images[-1]
+        new_img_pil = Image.fromarray(new_img)
+
+        # Save image in the corresponding age subdirectory
+        new_img_pil.save(os.path.join(age_dir, f'{input_img_name}.png'))
