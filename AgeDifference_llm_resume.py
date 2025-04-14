@@ -35,7 +35,7 @@ def model_detect(image_path):
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "请检测图片中人物的年龄和带两位小数点质量评分(0-100)，并以以下格式返回: age:{年龄}, quality:{质量评分}"},
+                {"type": "text", "text": "请检测图片中人物的年龄和带两位小数点质量评分(0-100)，并以以下格式返回: age:{年龄}, quality:{质量评分},严禁回复其他任何内容"},
                 {"type": "image_url", "image_url": {"url": f"data:image/png;base64,{image_path}"}}
             ]
         }
@@ -43,7 +43,7 @@ def model_detect(image_path):
 
     try:
         completion = client.chat.completions.create(
-            model="qwen-vl-plus",  # 使用适合的视觉语言模型
+            model="qwen2.5-vl-32b-instruct",  # 使用适合的视觉语言模型
             messages=messages
         )
 
@@ -197,7 +197,7 @@ def process_images(base_dir, out_file="age_quality_analysis.txt"):
 if __name__ == "__main__":
     process_images(
         base_dir="cusp_out",  # 替换实际路径
-        out_file="cusp_result.txt"
+        out_file="cusp_agedif_quality_result.txt"
     )
     if os.path.exists(CHECKPOINT_FILE):
         os.remove(CHECKPOINT_FILE)  # 完成后自动清理检查点
