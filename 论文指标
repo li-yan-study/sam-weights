@@ -1,0 +1,29 @@
+AGE BLUR,GENDER,EMOTION,PRESERVATION：young to 特定的年纪  在该特定的年纪进行评判
+Model	指标
+Lifespan	1 Same id:显示输入和输出的照片，并询问两者是否包含同一个人。
+2 Age difference:为了测量年龄的准确性，我们显示输出的照片，并询问从年龄范围列表中选择的人的年龄。
+3 Overall better为了衡量整体质量，给定输入和年龄，询问不同模型输出的结果哪个是最好 符合的。
+随机选择20张图片收集答案，每个问题重复5次，总共有500个不同的答案。
+
+HRFAE	在线人脸api（face++） 定量评估：年龄、模糊度、性别保留度
+选择一个特定的年纪进行比较
+Age, Blur,Gender,smiling,Emotion netural, preservation Happiness
+
+SAM	1人脸api（Microsoft Azure Face API）：不同模型每隔五岁进行求age difference
+2 人工评价：age 在特定的几个年龄，询问得到不同模型最符合要求的.
+quality质量评价
+id身份保持。
+Age difference, quality, id
+
+CUSP	目标年龄与输入年龄相似使用LPIPS衡量
+Age difference：DEX偏向年轻人，使用在线api（face++）：Face⁺⁺-旷视Face⁺⁺人脸识别,OCR文字识别,人工智能开放平台
+人工评估：在身份保存、目标年龄准确性、真实性、年龄过渡的自然性和整体偏好方
+面的偏好。
+只对生产特定年纪60岁进行age difference比较 同是face++预测输入图像为60岁的结果为68左右，所以目标年龄为60的结果经过face++应该是68左右
+MAE, Gender, Predicted Age Blur Gender Smiling Neutral Happy
+
+FADING	老化准确率、与年龄无关的属性保留和老化质量
+年龄估计器的预测与目标年龄进行比较。性别、微笑和面部表情保存。
+使用face++ 2进行老化精度、属性保持和模糊度评估。
+MAE ,Gender, KID, Blur Gender Smiling Neutral Happy 
+ 
